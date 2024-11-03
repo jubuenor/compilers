@@ -1,0 +1,10 @@
+services:
+  cool-vm:
+    build: .
+    command: bash
+    stdin_open: true
+    tty: true
+    volumes:
+      - data:/home/root/cool/compilers
+volumes:
+  data:
