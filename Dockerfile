@@ -3,7 +3,7 @@ FROM debian:buster-slim
 # Install dependencies
 
 RUN apt-get update && apt-get install -y \
-    flex \
+    flex-old \
     bison \
     build-essential \
     csh \
@@ -27,14 +27,14 @@ RUN wget --no-check-certificate 'https://docs.google.com/uc?export=download&id=1
  && tar -xf student-dist.tar.gz \
  && rm student-dist.tar.gz
 
+# Set the working directory
+
+WORKDIR /home/root/cool
+
 # Set link
 
-RUN ln -s /usr/class/cool ~/cool
+RUN ln -s /usr/class/cool /home/root/cool/
 
 # Set environment variables
 
 ENV PATH="/usr/class/cool/bin:${PATH}"
-
-# Set the working directory
-
-WORKDIR /home/root/
