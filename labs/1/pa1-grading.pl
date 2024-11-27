@@ -1,3 +1,4 @@
+# chmod a+x pa1-grading.pl
 #!/usr/bin/perl -w
 
 use strict;

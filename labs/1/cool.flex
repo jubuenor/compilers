@@ -50,43 +50,156 @@ extern YYSTYPE cool_yylval;
 
 %}
 
-/*
- * DEFINITIONS
- */
+%option noyywrap
+%x COMMENT
+%x STRING
 
 /*
+ * DEFINITIONS
  * Define names for regular expressions here.
  */
 
 DARROW          =>
+ASSIGN          <-
+LE              <=
+
 DIGIT           [0-9]
+LETTER          [a-zA-Z_]
+TRUE            true
+FALSE           false
+NEWLINE         (\n|\r\n)+
+WHITESPACE      [ \t]+
+DASHCOMMENT     --.*\n
+
+CLASS           (?i:class)
+ELSE            (?i:else)
+FI              (?i:fi)
+IF              (?i:if)
+IN              (?i:in)
+INHERITS        (?i:inherits)
+ISVOID          (?i:isvoid)
+LET             (?i:let)
+LOOP            (?i:loop)
+POOL            (?i:pool)
+THEN            (?i:then)
+WHILE           (?i:while)
+CASE            (?i:case)
+ESAC            (?i:esac)
+NEW             (?i:new)
+OF              (?i:of)
+NOT             (?i:not)
+
+TYPEID          [A-Z]({DIGIT}|{LETTER})*
+OBJECTID        [a-z]({DIGIT}|{LETTER})*
 INT_CONST       {DIGIT}+
+
 
 %%
 
 
-/*
- * RULES
- */
-
  /*
+  *  RULES
   *  Nested comments
+  *  The multiple-character operators.
   */
 
-<INITIAL>{
-    /*
-     *  The multiple-character operators.
-     */
-    {DARROW}                { return (DARROW); }
+{DARROW} { return DARROW; }
+{LE} { return LE; }
+{ASSIGN} { return ASSIGN; }
 
-    /*
-     * Keywords are case-insensitive except for the values true and false,
-     * which must begin with a lower-case letter.
-     */
+"{" { return '{'; }
+"}" { return '}'; }
+"(" { return '('; }
+")" { return ')'; }
+";" { return ';'; }
+":" { return ':'; }
+"," { return ','; }
+"." { return '.'; }
+"+" { return '+'; }
+"-" { return '-'; }
+"*" { return '*'; }
+"/" { return '/'; }
+"~" { return '~'; }
+"<" { return '<'; }
+"=" { return '='; }
+"@" { return '@'; }
+"%" { return '%'; }
+
     
-    {INT_CONST}             {cool_yylval.symbol = inttable.add_string(yytext);
-                             return INT_CONST; }
+{INT_CONST} { 
+    cool_yylval.symbol = inttable.add_string(yytext);
+    return INT_CONST;
 }
+
+{TRUE} { 
+    cool_yylval.boolean = true;
+    return BOOL_CONST;
+}
+
+{FALSE} {
+    cool_yylval.boolean = false;
+    return BOOL_CONST;
+}
+
+{CLASS} { return CLASS; }
+{ELSE} { return ELSE; }
+{FI} { return FI; }
+{IF} { return IF; }
+{IN} { return IN; }
+{INHERITS} { return INHERITS; }
+{ISVOID} { return ISVOID; }
+{LET} { return LET; }
+{LOOP} { return LOOP; }
+{POOL} { return POOL; }
+{THEN} { return THEN; }
+{WHILE} { return WHILE; }
+{CASE} { return CASE; }
+{ESAC} { return ESAC; }
+{NEW} { return NEW; }
+{OF} { return OF; }
+{NOT} { return NOT; }
+{WHITESPACE} { /* ignore */ }
+
+{TYPEID} {
+    cool_yylval.symbol = idtable.add_string(yytext);
+    return TYPEID;
+}
+
+{OBJECTID} {
+    cool_yylval.symbol = idtable.add_string(yytext);
+    return OBJECTID;
+}
+
+\n { curr_lineno++; }
+
+"*)" {
+    cool_yylval.error_msg = "Unmatched *)";
+    return ERROR;
+}
+
+"(" {
+    BEGIN(COMMENT);
+}
+
+<COMMENT><<EOF>> {
+    BEGIN(INITIAL);
+    cool_yylval.error_msg = "EOF in comment";
+    return ERROR;
+}
+
+<COMMENT>\n {
+    curr_lineno++;
+}
+<COMMENT>"*)" {
+    BEGIN(INITIAL);
+}
+<COMMENT>. { /* ignore */ }
+{DASHCOMMENT} { curr_lineno++; }
+
+ /*
+  * Keywords are case-insensitive except for the values true and false,
+  * which must begin with a lower-case letter.
+  */
 
  /*
   *  String constants (C syntax)

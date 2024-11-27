@@ -3,7 +3,7 @@ FROM debian:buster-slim
 # Install dependencies
 
 RUN apt-get update && apt-get install -y \
-    flex-old \
+    flex \
     bison \
     build-essential \
     csh \
