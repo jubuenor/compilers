@@ -51,8 +51,8 @@ extern YYSTYPE cool_yylval;
 %}
 
 %option noyywrap
-%x COMMENT
-%x STRING
+%x COMMENT STRING
+
 
 /*
  * DEFINITIONS
@@ -64,12 +64,29 @@ ASSIGN          <-
 LE              <=
 
 DIGIT           [0-9]
+DIGITS			{DIGIT}+
 LETTER          [a-zA-Z_]
-TRUE            true
-FALSE           false
-NEWLINE         (\n|\r\n)+
-WHITESPACE      [ \t]+
-DASHCOMMENT     --.*\n
+TRUE            t[Rr][Uu][Ee]
+FALSE           f[Aa][Ll][Ss][Ee]
+/* TRUE            true
+   FALSE           false*/
+/* NEWLINE         (\n|\r\n)+*/
+WHITESPACE      [ \t\b\v\r]
+DASHCOMMENT     --.*
+
+/*
+  *  String constants (C syntax)
+  *  Escape sequence \c is accepted for all characters c. Except for 
+  *  \n \t \b \f, the result is c.
+  *
+  */
+
+STRINGTEXT		(\\{WHITESPACE}+|\\\"|[^\"\n])*
+
+ /*
+  * Keywords are case-insensitive except for the values true and false,
+  * which must begin with a lower-case letter.
+  */
 
 CLASS           (?i:class)
 ELSE            (?i:else)
@@ -91,21 +108,24 @@ NOT             (?i:not)
 
 TYPEID          [A-Z]({DIGIT}|{LETTER})*
 OBJECTID        [a-z]({DIGIT}|{LETTER})*
-INT_CONST       {DIGIT}+
 
 
 %%
 
+	int comment_count = 0;
 
  /*
   *  RULES
-  *  Nested comments
   *  The multiple-character operators.
   */
 
 {DARROW} { return DARROW; }
 {LE} { return LE; }
 {ASSIGN} { return ASSIGN; }
+
+ /*
+  *  Single-character operators.
+  */
 
 "{" { return '{'; }
 "}" { return '}'; }
@@ -125,11 +145,30 @@ INT_CONST       {DIGIT}+
 "@" { return '@'; }
 "%" { return '%'; }
 
-    
-{INT_CONST} { 
+\n { curr_lineno++; }
+   
+{DIGITS} { 
     cool_yylval.symbol = inttable.add_string(yytext);
     return INT_CONST;
 }
+
+
+\" {
+	BEGIN(STRING);
+}
+
+<STRING>{STRINGTEXT} {
+	cool_yylval.symbol = stringtable.add_string(yytext);
+	return STR_CONST;
+}
+
+<STRING>\" {
+	BEGIN(INITIAL);
+}
+
+
+
+
 
 {TRUE} { 
     cool_yylval.boolean = true;
@@ -158,7 +197,7 @@ INT_CONST       {DIGIT}+
 {NEW} { return NEW; }
 {OF} { return OF; }
 {NOT} { return NOT; }
-{WHITESPACE} { /* ignore */ }
+{WHITESPACE}+ { /* ignore */ }
 
 {TYPEID} {
     cool_yylval.symbol = idtable.add_string(yytext);
@@ -170,43 +209,55 @@ INT_CONST       {DIGIT}+
     return OBJECTID;
 }
 
-\n { curr_lineno++; }
-
-"*)" {
-    cool_yylval.error_msg = "Unmatched *)";
-    return ERROR;
-}
-
-"(" {
+"(*" {
+	comment_count++;
     BEGIN(COMMENT);
 }
 
+"*)" {
+	cool_yylval.error_msg = "Unmatched *)";
+	return ERROR;
+}
+
+ /*
+  *  Nested comments
+  */
+
+<COMMENT>"(*" {
+	comment_count++;
+}
+
+<COMMENT>"*)" {
+	comment_count--;
+
+	if (comment_count == 0) {
+		BEGIN(INITIAL);
+	}
+}
+
+<COMMENT>. { /* ignore */ }
+ 
 <COMMENT><<EOF>> {
     BEGIN(INITIAL);
     cool_yylval.error_msg = "EOF in comment";
     return ERROR;
 }
 
-<COMMENT>\n {
-    curr_lineno++;
-}
-<COMMENT>"*)" {
-    BEGIN(INITIAL);
-}
-<COMMENT>. { /* ignore */ }
-{DASHCOMMENT} { curr_lineno++; }
-
  /*
-  * Keywords are case-insensitive except for the values true and false,
-  * which must begin with a lower-case letter.
-  */
+		<COMMENT>\n {
+			curr_lineno++;
+		}
+		<COMMENT>"*)" {
+			BEGIN(INITIAL);
+		}
+ */
 
- /*
-  *  String constants (C syntax)
-  *  Escape sequence \c is accepted for all characters c. Except for 
-  *  \n \t \b \f, the result is c.
-  *
-  */
+{DASHCOMMENT} {   }
+
+. {
+    cool_yylval.error_msg = "LEXER BUG - UNMATCHED: ";
+    return ERROR;
+}
 
 
 %%
