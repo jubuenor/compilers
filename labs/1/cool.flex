@@ -42,6 +42,14 @@ char *string_buf_ptr;
 extern int curr_lineno;
 extern int verbose_flag;
 
+/*
+ * how many open comments are.
+ */
+int comment_count = 0;
+
+std::string complete_str = "";
+
+
 extern YYSTYPE cool_yylval;
 
 /*
@@ -112,10 +120,10 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 
 %%
 
-	int comment_count = 0;
 
  /*
   *  RULES
+  *
   *  The multiple-character operators.
   */
 
@@ -127,26 +135,52 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
   *  Single-character operators.
   */
 
-"{" { return '{'; }
-"}" { return '}'; }
-"(" { return '('; }
-")" { return ')'; }
-";" { return ';'; }
-":" { return ':'; }
-"," { return ','; }
-"." { return '.'; }
-"+" { return '+'; }
-"-" { return '-'; }
-"*" { return '*'; }
-"/" { return '/'; }
-"~" { return '~'; }
-"<" { return '<'; }
-"=" { return '='; }
-"@" { return '@'; }
-"%" { return '%'; }
+[{}();:,.+\-*\/~<=@] { return yytext[0]; }
+
+ /*
+  *  Keywords.
+  */
+
+{CLASS} { return CLASS; }
+{ELSE} { return ELSE; }
+{FI} { return FI; }
+{IF} { return IF; }
+{IN} { return IN; }
+{INHERITS} { return INHERITS; }
+{ISVOID} { return ISVOID; }
+{LET} { return LET; }
+{LOOP} { return LOOP; }
+{POOL} { return POOL; }
+{THEN} { return THEN; }
+{WHILE} { return WHILE; }
+{CASE} { return CASE; }
+{ESAC} { return ESAC; }
+{NEW} { return NEW; }
+{OF} { return OF; }
+{NOT} { return NOT; }
+
+ /*
+  * Whitespaces and newline.
+  */
+
+{WHITESPACE}+ { /* ignore */ }
 
 \n { curr_lineno++; }
-   
+
+ /*
+  * Constants.
+  */  
+ 
+{TRUE} { 
+    cool_yylval.boolean = true;
+    return BOOL_CONST;
+}
+
+{FALSE} {
+    cool_yylval.boolean = false;
+    return BOOL_CONST;
+}
+ 
 {DIGITS} { 
     cool_yylval.symbol = inttable.add_string(yytext);
     return INT_CONST;
@@ -169,35 +203,9 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 
 
 
-
-{TRUE} { 
-    cool_yylval.boolean = true;
-    return BOOL_CONST;
-}
-
-{FALSE} {
-    cool_yylval.boolean = false;
-    return BOOL_CONST;
-}
-
-{CLASS} { return CLASS; }
-{ELSE} { return ELSE; }
-{FI} { return FI; }
-{IF} { return IF; }
-{IN} { return IN; }
-{INHERITS} { return INHERITS; }
-{ISVOID} { return ISVOID; }
-{LET} { return LET; }
-{LOOP} { return LOOP; }
-{POOL} { return POOL; }
-{THEN} { return THEN; }
-{WHILE} { return WHILE; }
-{CASE} { return CASE; }
-{ESAC} { return ESAC; }
-{NEW} { return NEW; }
-{OF} { return OF; }
-{NOT} { return NOT; }
-{WHITESPACE}+ { /* ignore */ }
+ /*
+  * Identifiers.
+  */
 
 {TYPEID} {
     cool_yylval.symbol = idtable.add_string(yytext);
@@ -208,6 +216,10 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
     cool_yylval.symbol = idtable.add_string(yytext);
     return OBJECTID;
 }
+ 
+ /*
+  *  Comments.
+  */
 
 "(*" {
 	comment_count++;
@@ -218,10 +230,6 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 	cool_yylval.error_msg = "Unmatched *)";
 	return ERROR;
 }
-
- /*
-  *  Nested comments
-  */
 
 <COMMENT>"(*" {
 	comment_count++;
@@ -243,19 +251,14 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
     return ERROR;
 }
 
- /*
-		<COMMENT>\n {
-			curr_lineno++;
-		}
-		<COMMENT>"*)" {
-			BEGIN(INITIAL);
-		}
- */
-
 {DASHCOMMENT} {   }
 
+ /*
+  * Error class.
+  */
+
 . {
-    cool_yylval.error_msg = "LEXER BUG - UNMATCHED: ";
+    cool_yylval.error_msg = yytext;
     return ERROR;
 }
 
