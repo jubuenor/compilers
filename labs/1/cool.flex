@@ -48,6 +48,7 @@ extern int verbose_flag;
 int comment_count = 0;
 
 std::string complete_str = "";
+bool str_has_null = false;
 
 
 extern YYSTYPE cool_yylval;
@@ -72,14 +73,11 @@ ASSIGN          <-
 LE              <=
 
 DIGIT           [0-9]
-DIGITS			{DIGIT}+
+DIGITS		{DIGIT}+
 LETTER          [a-zA-Z_]
 TRUE            t[Rr][Uu][Ee]
 FALSE           f[Aa][Ll][Ss][Ee]
-/* TRUE            true
-   FALSE           false*/
-/* NEWLINE         (\n|\r\n)+*/
-WHITESPACE      [ \t\b\v\r]
+WHITESPACE      [ \t\b\f]
 DASHCOMMENT     --.*
 
 /*
@@ -124,6 +122,7 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
  /*
   *  RULES
   *
+  *
   *  The multiple-character operators.
   */
 
@@ -136,6 +135,7 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
   */
 
 [{}();:,.+\-*\/~<=@] { return yytext[0]; }
+
 
  /*
   *  Keywords.
@@ -159,6 +159,7 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 {OF} { return OF; }
 {NOT} { return NOT; }
 
+
  /*
   * Whitespaces and newline.
   */
@@ -166,6 +167,7 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 {WHITESPACE}+ { /* ignore */ }
 
 \n { curr_lineno++; }
+
 
  /*
   * Constants.
@@ -189,18 +191,68 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 
 \" {
 	BEGIN(STRING);
+	complete_str = "";
+	str_has_null = false;
 }
 
-<STRING>{STRINGTEXT} {
-	cool_yylval.symbol = stringtable.add_string(yytext);
-	return STR_CONST;
+<STRING>\0 {
+	str_has_null = true;
+	cool_yylval.error_msg = "String contains null character";
+	return ERROR;
+}
+
+<STRING>[^"\n\\] {
+	complete_str += yytext;
+}
+
+<STRING>\\(.|\n) {
+	switch (yytext[1]) {
+	case '\n':
+		curr_lineno++;
+		complete_str.push_back('\n');
+		break;
+	case 'n':
+		curr_lineno++;
+		complete_str.push_back('\n');
+		break;case 'b':
+		complete_str.push_back('\b');
+		break;
+	case 'f':
+		complete_str.push_back('\f');
+		break;
+	case 't':
+		complete_str.push_back('\t');
+		break;
+	case '"':
+		complete_str.push_back('\"');
+		break;
+	default:
+		complete_str.push_back(yytext[1]);
+		break;
+	}
+}
+
+<STRING>\n {
+	curr_lineno++;
+	BEGIN(INITIAL);
+	cool_yylval.error_msg = "Unterminated string constant";
+	return ERROR;
+}
+
+<STRING><<EOF>> {
+	BEGIN(INITIAL);
+	cool_yylval.error_msg = "EOF in string constant";
+	return ERROR;
 }
 
 <STRING>\" {
 	BEGIN(INITIAL);
+
+	if (!str_has_null) {
+		cool_yylval.symbol = stringtable.add_string((char *) complete_str.c_str());
+		return STR_CONST;
+	}
 }
-
-
 
 
  /*
@@ -217,6 +269,7 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
     return OBJECTID;
 }
  
+
  /*
   *  Comments.
   */
@@ -252,6 +305,7 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 }
 
 {DASHCOMMENT} {   }
+
 
  /*
   * Error class.
