@@ -77,13 +77,16 @@ DIGITS		{DIGIT}+
 LETTER          [a-zA-Z_]
 TRUE            t[Rr][Uu][Ee]
 FALSE           f[Aa][Ll][Ss][Ee]
-WHITESPACE      [ \t\b\f]
+WHITESPACE      [ \t\b\f\r\v]
 DASHCOMMENT     --.*
 
 /*
   *  String constants (C syntax)
   *  Escape sequence \c is accepted for all characters c. Except for 
-  *  \n \t \b \f, the result is c.
+  *  \n \t \b \f \r and \v, the result is c.
+  * 
+  * (Not the same special characters described in page 15,
+  * vertical tab and carriage return are also needed.)
   *
   */
 
@@ -166,7 +169,7 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 
 {WHITESPACE}+ { /* ignore */ }
 
-\n { curr_lineno++; }
+<INITIAL,COMMENT>\n { curr_lineno++; }
 
 
  /*
@@ -195,7 +198,7 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 	str_has_null = false;
 }
 
-<STRING>\0 {
+<STRING>(\\)?\0 {
 	str_has_null = true;
 	cool_yylval.error_msg = "String contains null character";
 	return ERROR;
@@ -233,10 +236,13 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 }
 
 <STRING>\n {
-	curr_lineno++;
 	BEGIN(INITIAL);
-	cool_yylval.error_msg = "Unterminated string constant";
-	return ERROR;
+	curr_lineno++;
+
+	if (!str_has_null && complete_str.length() <= 1024) {
+		cool_yylval.error_msg = "Unterminated string constant";
+		return ERROR;
+	}
 }
 
 <STRING><<EOF>> {
@@ -248,9 +254,14 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 <STRING>\" {
 	BEGIN(INITIAL);
 
-	if (!str_has_null) {
+	if (!str_has_null && complete_str.length() <= 1024) {	
 		cool_yylval.symbol = stringtable.add_string((char *) complete_str.c_str());
 		return STR_CONST;
+	}
+
+	if (complete_str.length() > 1024) {
+		cool_yylval.error_msg = "Unterminated string constant";
+		return ERROR;
 	}
 }
 
@@ -295,6 +306,8 @@ OBJECTID        [a-z]({DIGIT}|{LETTER})*
 		BEGIN(INITIAL);
 	}
 }
+
+ /* <COMMENT>\n { curr_lineno++; } */
 
 <COMMENT>. { /* ignore */ }
  
