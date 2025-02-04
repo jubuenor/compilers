@@ -150,6 +150,7 @@
 	%type <expression> expr
 	%type <expressions> comma_expr_list
 	%type <expressions> smcl_expr_list
+	%type <expression> let_body
     
     /* Precedence declarations go here. */
 	%left '+' '-'
@@ -272,8 +273,8 @@
 	{ $$ = typcase($2,$4); }
 	| '{' smcl_expr_list '}'
 	{ $$ = block($2); }
-	| LET OBJECTID ':' TYPEID IN expr /* COMPLETAR DESPUES */
-	{}
+	| LET let_body /*OBJECTID ':' TYPEID IN expr*/
+	{ $$ = $2; }
 	| expr '+' expr
 	{ $$ = plus($1,$3); }
 	| expr '-' expr
@@ -307,8 +308,22 @@
 	| OBJECTID
 	{ $$ = object($1); }
 	;
-	
+
+	/* let structure implementation. */
+	let_body
+	: OBJECTID ':' TYPEID ASSIGN expr IN expr
+	{ $$ = let($1,$3,$5,$7); }
+	| OBJECTID ':' TYPEID IN expr
+	{ $$ = let($1,$3,no_expr(),$5); }
+	| OBJECTID ':' TYPEID ASSIGN expr ',' let_body
+	{ $$ = let($1,$3,$5,$7); }
+	| OBJECTID ':' TYPEID ',' let_body
+	{ $$ = let($1,$3,no_expr(),$5); }
+	| error ',' let_body
+	{}
+	;
    
+	
     /* end of grammar */
     %%
     
