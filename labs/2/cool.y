@@ -265,6 +265,8 @@
 	{ $$ = static_dispatch($1,$3,$5,$7); }
 	| expr '.' OBJECTID '(' comma_expr_list ')'
 	{ $$ = dispatch($1,$3,$5); }
+	| OBJECTID '(' comma_expr_list ')'
+	{ $$ = dispatch(object(idtable.add_string("self")),$1,$3); }
 	| IF expr THEN expr ELSE expr FI
 	{ $$ = cond($2,$4,$6); }
 	| WHILE expr LOOP expr POOL
@@ -273,7 +275,7 @@
 	{ $$ = typcase($2,$4); }
 	| '{' smcl_expr_list '}'
 	{ $$ = block($2); }
-	| LET let_body /*OBJECTID ':' TYPEID IN expr*/
+	| LET let_body 
 	{ $$ = $2; }
 	| expr '+' expr
 	{ $$ = plus($1,$3); }
