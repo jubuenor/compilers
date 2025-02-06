@@ -153,18 +153,19 @@
 	%type <expression> let_body
     
     /* Precedence declarations go here. */
+	%nonassoc '='
+	%right ASSIGN
+	//%left OF IN
 	%left '+' '-'
 	%left '*' '/'
 	%left '.' '@'
-	%left OF IN
 	%right '~'
-	%right ASSIGN
 	%right ISVOID
 	%right NOT
+	%nonassoc '<' LE
 	%right NEW
 	%right DARROW
 	
-	%nonassoc '<' '=' LE
     
     
     %%
@@ -189,7 +190,7 @@
     stringtable.add_string(curr_filename)); }
     | CLASS TYPEID INHERITS TYPEID '{' feature_list '}' ';'
     { $$ = class_($2,$4,$6,stringtable.add_string(curr_filename)); }
-	| CLASS error ';'
+	| error ';'
 	{}
     ;
     
@@ -197,20 +198,21 @@
     feature_list
 	:
     { $$ = nil_Features(); }
-	| feature		/* single feature */
+	| feature ';' /* single feature */
 	{ $$ = single_Features($1); }
-	| feature_list feature		/* many features */
+	| feature_list feature ';'	/* many features */
 	{ $$ = append_Features($1,single_Features($2)); }
 	;
 
 	/* Feature phylum has two constructors: method and attr */
 	feature
-	: OBJECTID '(' formal_list ')' ':' TYPEID '{' expr '}' ';'
+	: OBJECTID '(' formal_list ')' ':' TYPEID '{' expr '}'
 	{ $$ = method($1,$3,$6,$8); }
-	| OBJECTID ':' TYPEID ASSIGN expr ';'
+	| OBJECTID ':' TYPEID ASSIGN expr
 	{ $$ = attr($1,$3,$5); }
-	| OBJECTID ':' TYPEID ';'
+	| OBJECTID ':' TYPEID
 	{ $$ = attr($1,$3,no_expr()); }
+	| error
 	;
 	
 	formal_list
@@ -256,6 +258,7 @@
 	{ $$ = single_Expressions($1); }
 	| smcl_expr_list expr ';'
 	{ $$ = append_Expressions($1,single_Expressions($2)); }
+	| error ';'
 	;
 
 	expr
@@ -271,10 +274,10 @@
 	{ $$ = cond($2,$4,$6); }
 	| WHILE expr LOOP expr POOL
 	{ $$ = loop($2,$4); }
-	| CASE expr OF branch_list ESAC
-	{ $$ = typcase($2,$4); }
 	| '{' smcl_expr_list '}'
 	{ $$ = block($2); }
+	| CASE expr OF branch_list ESAC
+	{ $$ = typcase($2,$4); }
 	| LET let_body 
 	{ $$ = $2; }
 	| expr '+' expr
