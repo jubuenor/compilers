@@ -1,13 +1,25 @@
+
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include "semant.h"
 #include "utilities.h"
+#include <map>
+#include <algorithm>
+#include <vector>  
 
+using namespace std;
 
 extern int semant_debug;
 extern char *curr_filename;
 
+ClassTable *classtable;
+
+static std::map<Symbol, Class_> class_map;
+
+typedef std::pair<Symbol, Symbol> method_id;
+std::map<method_id, method_class *> method_env;
 //////////////////////////////////////////////////////////////////////
 //
 // Symbols
@@ -23,7 +35,7 @@ static Symbol
     Bool,
     concat,
     cool_abort,
-    copy,
+    copy_sym,
     Int,
     in_int,
     in_string,
@@ -54,7 +66,7 @@ static void initialize_constants(void)
     Bool        = idtable.add_string("Bool");
     concat      = idtable.add_string("concat");
     cool_abort  = idtable.add_string("abort");
-    copy        = idtable.add_string("copy");
+    copy_sym    = idtable.add_string("copy");
     Int         = idtable.add_string("Int");
     in_int      = idtable.add_string("in_int");
     in_string   = idtable.add_string("in_string");
@@ -62,8 +74,6 @@ static void initialize_constants(void)
     length      = idtable.add_string("length");
     Main        = idtable.add_string("Main");
     main_meth   = idtable.add_string("main");
-    //   _no_class is a symbol that can't be the name of any 
-    //   user-defined class.
     No_class    = idtable.add_string("_no_class");
     No_type     = idtable.add_string("_no_type");
     Object      = idtable.add_string("Object");
@@ -79,12 +89,98 @@ static void initialize_constants(void)
     val         = idtable.add_string("_val");
 }
 
+enum VisitState { UNVISITED, VISITING, VISITED };
 
+bool dfs_check(Symbol cls_sym,
+    std::map<Symbol, Class_>& class_map,
+    std::map<Symbol, VisitState>& state) {
+    state[cls_sym] = VISITING;
+    Class_ cls = class_map[cls_sym];
+    Symbol parent = cls->get_parent();
+
+    if (parent != Object) { 
+        if (class_map.find(parent) == class_map.end()) {
+            classtable->semant_error(cls) << "Parent class " << parent << " is not defined." << std::endl;
+            return true;
+        }
+        if (parent == Int || parent == Bool || parent == Str || parent == SELF_TYPE) {
+            classtable->semant_error(cls) << "Classes cannot inherit from basic class " << parent << std::endl;
+            return true;
+        }
+        if (state[parent] == VISITING)
+            return true;
+
+        if (state[parent] == UNVISITED) {
+            if (dfs_check(parent, class_map, state))
+                return true;
+        }
+    }
+    state[cls_sym] = VISITED;
+    return false;
+}
+
+bool check_inheritance(std::map<Symbol, Class_>& class_map) {
+    std::map<Symbol, VisitState> state;
+    
+    // Initialize all classes as UNVISITED using traditional iterator
+    std::map<Symbol, Class_>::iterator it;
+    for (it = class_map.begin(); it != class_map.end(); ++it) {
+        state[it->first] = UNVISITED;
+    }
+    
+    // Check each unvisited class using traditional iterator
+    for (it = class_map.begin(); it != class_map.end(); ++it) {
+        Symbol cls_sym = it->first;
+        if (state[cls_sym] == UNVISITED) {
+            if (dfs_check(cls_sym, class_map, state)) {
+                return true;  // Error found
+            }
+        }
+    }
+    return false;  // No errors found
+}
 
 ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) {
 
     /* Fill this in */
+    install_basic_classes();
 
+    if (classes == NULL) {
+        semant_error() << "No classes defined." << endl;
+        return;
+    }
+
+    for (int i = classes->first(); classes->more(i); i = classes->next(i))
+    {
+        Class_ c = classes->nth(i);
+        Symbol class_name = c->get_name();
+
+        if (class_name == SELF_TYPE) {
+            semant_error(c) << "Redefinition of basic class SELF_TYPE." << endl;
+            return;
+        }
+
+        if (class_name == No_class) {
+            semant_error(c) << "Redefinition of basic class No_class." << endl;
+            return;
+        }
+
+        if (class_map.find(class_name) != class_map.end()) {
+            semant_error(c) << "Redefinition of class." << endl;
+            return;
+        }
+
+        class_map[class_name] = c;
+
+        if (class_map.find(Main) == class_map.end()) {
+            semant_error(c) << "Class Main is not defined." << endl;
+            return;
+        }
+
+        if (check_inheritance(class_map)) {
+            return;
+        }
+    }
 }
 
 void ClassTable::install_basic_classes() {
@@ -112,14 +208,14 @@ void ClassTable::install_basic_classes() {
     // are already built in to the runtime system.
 
     Class_ Object_class =
-        class_(Object, 
-               No_class,
-               append_Features(
-                               append_Features(
-                                               single_Features(method(cool_abort, nil_Formals(), Object, no_expr())),
-                                               single_Features(method(type_name, nil_Formals(), Str, no_expr()))),
-                               single_Features(method(copy, nil_Formals(), SELF_TYPE, no_expr()))),
-               filename);
+	class_(Object, 
+	       No_class,
+	       append_Features(
+			       append_Features(
+					       single_Features(method(cool_abort, nil_Formals(), Object, no_expr())),
+					       single_Features(method(type_name, nil_Formals(), Str, no_expr()))),
+			       single_Features(method(copy_sym, nil_Formals(), SELF_TYPE, no_expr()))),
+	       filename);
 
     // 
     // The IO class inherits from Object. Its methods are
@@ -129,34 +225,34 @@ void ClassTable::install_basic_classes() {
     //        in_int() : Int                      "   an int     "  "     "
     //
     Class_ IO_class = 
-        class_(IO, 
-               Object,
-               append_Features(
-                               append_Features(
-                                               append_Features(
-                                                               single_Features(method(out_string, single_Formals(formal(arg, Str)),
-                                                                                      SELF_TYPE, no_expr())),
-                                                               single_Features(method(out_int, single_Formals(formal(arg, Int)),
-                                                                                      SELF_TYPE, no_expr()))),
-                                               single_Features(method(in_string, nil_Formals(), Str, no_expr()))),
-                               single_Features(method(in_int, nil_Formals(), Int, no_expr()))),
-               filename);  
+	class_(IO, 
+	       Object,
+	       append_Features(
+			       append_Features(
+					       append_Features(
+							       single_Features(method(out_string, single_Formals(formal(arg, Str)),
+										      SELF_TYPE, no_expr())),
+							       single_Features(method(out_int, single_Formals(formal(arg, Int)),
+										      SELF_TYPE, no_expr()))),
+					       single_Features(method(in_string, nil_Formals(), Str, no_expr()))),
+			       single_Features(method(in_int, nil_Formals(), Int, no_expr()))),
+	       filename);  
 
     //
     // The Int class has no methods and only a single attribute, the
     // "val" for the integer. 
     //
     Class_ Int_class =
-        class_(Int, 
-               Object,
-               single_Features(attr(val, prim_slot, no_expr())),
-               filename);
+	class_(Int, 
+	       Object,
+	       single_Features(attr(val, prim_slot, no_expr())),
+	       filename);
 
     //
     // Bool also has only the "val" slot.
     //
     Class_ Bool_class =
-        class_(Bool, Object, single_Features(attr(val, prim_slot, no_expr())),filename);
+	class_(Bool, Object, single_Features(attr(val, prim_slot, no_expr())),filename);
 
     //
     // The class Str has a number of slots and operations:
@@ -167,25 +263,31 @@ void ClassTable::install_basic_classes() {
     //       substr(arg: Int, arg2: Int): Str     substring selection
     //       
     Class_ Str_class =
-        class_(Str, 
-               Object,
-               append_Features(
-                               append_Features(
-                                               append_Features(
-                                                               append_Features(
-                                                                               single_Features(attr(val, Int, no_expr())),
-                                                                               single_Features(attr(str_field, prim_slot, no_expr()))),
-                                                               single_Features(method(length, nil_Formals(), Int, no_expr()))),
-                                               single_Features(method(concat, 
-                                                                      single_Formals(formal(arg, Str)),
-                                                                      Str, 
-                                                                      no_expr()))),
-                               single_Features(method(substr, 
-                                                      append_Formals(single_Formals(formal(arg, Int)), 
-                                                                     single_Formals(formal(arg2, Int))),
-                                                      Str, 
-                                                      no_expr()))),
-               filename);
+	class_(Str, 
+	       Object,
+	       append_Features(
+			       append_Features(
+					       append_Features(
+							       append_Features(
+									       single_Features(attr(val, Int, no_expr())),
+									       single_Features(attr(str_field, prim_slot, no_expr()))),
+							       single_Features(method(length, nil_Formals(), Int, no_expr()))),
+					       single_Features(method(concat, 
+								      single_Formals(formal(arg, Str)),
+								      Str, 
+								      no_expr()))),
+			       single_Features(method(substr, 
+						      append_Formals(single_Formals(formal(arg, Int)), 
+								     single_Formals(formal(arg2, Int))),
+						      Str, 
+						      no_expr()))),
+	       filename);
+
+    class_map[Object] = Object_class;
+    class_map[IO] = IO_class;
+    class_map[Int] = Int_class;
+    class_map[Bool] = Bool_class;
+    class_map[Str] = Str_class;
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -245,8 +347,8 @@ void program_class::semant()
     /* some semantic analysis code may go here */
 
     if (classtable->errors()) {
-        cerr << "Compilation halted due to static semantic errors." << endl;
-        exit(1);
+	cerr << "Compilation halted due to static semantic errors." << endl;
+	exit(1);
     }
 }
 
