@@ -238,6 +238,10 @@ public:
       return formals;
    }
 
+   Symbol get_return_type() {
+      return return_type;
+   }
+
    Symbol typecheck(type_env &tenv);
 
 
