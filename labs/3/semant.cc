@@ -1,5 +1,3 @@
-
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -321,6 +319,88 @@ ostream& ClassTable::semant_error()
     semant_errors++;                            
     return error_stream;
 } 
+
+bool cls_is_defined(Symbol cls_name) {
+    return cls_name == SELF_TYPE || class_map.find(cls_name) != class_map.end();
+}
+
+bool is_subclass(Symbol child, Symbol parent, type_env &tenv) {
+    if (child == SELF_TYPE) {
+        if (parent == SELF_TYPE) {
+            return true;
+        }
+        child = tenv.c->get_name();
+
+    }
+
+    for (Symbol cls = child; cls != Object; cls = class_map[cls]->get_parent()) {
+        if (cls == parent) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Type checking
+
+
+Symbol int_const_class::typecheck(type_env &tenv) {
+    return Int;
+}
+
+Symbol bool_const_class::typecheck(type_env &tenv) {
+    return Bool;
+}
+
+Symbol string_const_class::typecheck(type_env &tenv) {
+    return Str;
+}
+
+Symbol no_expr_class::typecheck(type_env &tenv) {
+    return No_type;
+}
+
+Symbol isvoid_class::typecheck(type_env &tenv) {
+    e1->typecheck(tenv);
+    return Bool;
+}
+
+Symbol new__class::typecheck(type_env &tenv) {
+    if (!cls_is_defined(type_name)) {
+        classtable->semant_error() << "Class " << type_name << " is not defined." << std::endl;
+        return Object;
+    }
+    return type_name;
+}
+
+Symbol comp_class::typecheck(type_env &tenv) {
+    Symbol t1 = e1->typecheck(tenv);
+    if (t1 != Bool) {
+        classtable->semant_error() << "Argument of 'not' has type " << t1 << " instead of Bool." << std::endl;
+    }
+    return Bool;
+}
+
+Symbol attr_class::typecheck(type_env &tenv) {
+    if (name == self) {
+        classtable->semant_error() << "'self' cannot be the name of an attribute." << std::endl;
+        return Object;
+    }
+
+    Symbol t0 = type_decl;
+    Symbol t1 = init->typecheck(tenv);
+
+    if (t1 == No_type) {
+        return t0;
+    }
+
+    if (!is_subclass(t1, t0, tenv)) {
+        classtable->semant_error() << "Inferred type " << t1 << " of initialization of attribute " << name << " does not conform to declared type " << t0 << "." << std::endl;
+    }
+
+}
+
+
 
 
 
