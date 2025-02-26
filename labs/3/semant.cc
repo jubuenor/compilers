@@ -341,6 +341,22 @@ bool is_subclass(Symbol child, Symbol parent, type_env &tenv) {
     return false;
 }
 
+Symbol cls_join(Symbol t1, Symbol t2, type_env &tenv) {
+    if (t1 == SELF_TYPE) {
+        t1 = tenv.c->get_name();
+    }
+    if (t2 == SELF_TYPE) {
+        t2 = tenv.c->get_name();
+    }
+
+    Class_ cl = class_map[t1];
+
+    for (; !is_subclass(t2, cl->get_name(), tenv); cl = class_map[cl->get_parent()]) {
+    }
+
+    return cl->get_name();
+}
+
 // Type checking
 
 
@@ -398,6 +414,91 @@ Symbol attr_class::typecheck(type_env &tenv) {
         classtable->semant_error() << "Inferred type " << t1 << " of initialization of attribute " << name << " does not conform to declared type " << t0 << "." << std::endl;
     }
 
+}
+
+Symbol loop_class::typecheck(type_env &tenv) {
+    if (pred->typecheck(tenv) != Bool) {
+        classtable->semant_error() << "Loop condition does not have type Bool." << std::endl;
+    }
+    body->typecheck(tenv);
+    return Object;
+}
+
+Symbol block_class::typecheck(type_env &tenv) {
+    for (int i = body->first(); body->more(i); i = body->next(i)) {
+        type = body->nth(i)->typecheck(tenv);
+    }
+    return type;
+}
+
+Symbol cond_class::typecheck(type_env &tenv) {
+    Symbol t1 = pred->typecheck(tenv);
+    Symbol t2 = then_exp->typecheck(tenv);
+    Symbol t3 = else_exp->typecheck(tenv);
+
+    if (t1 != Bool) {
+        classtable->semant_error() << "Predicate of 'if' does not have type Bool." << std::endl;
+    }
+    return cls_join(t2, t3, tenv);
+}
+
+Symbol plus_class::typecheck(type_env &tenv) {
+    if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
+        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " + " << e2->typecheck(tenv) << std::endl;
+    }
+    return Int;
+}
+
+Symbol sub_class::typecheck(type_env &tenv) {
+    if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
+        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " - " << e2->typecheck(tenv) << std::endl;
+    }
+    return Int;
+}
+
+Symbol mul_class::typecheck(type_env &tenv) {
+    if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
+        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " * " << e2->typecheck(tenv) << std::endl;
+    }
+    return Int;
+}
+
+Symbol divide_class::typecheck(type_env &tenv) {
+    if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
+        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " / " << e2->typecheck(tenv) << std::endl;
+    }
+    return Int;
+}
+
+Symbol neg_class::typecheck(type_env &tenv) {
+    if (e1->typecheck(tenv) != Int) {
+        classtable->semant_error() << "Argument of '~' has type " << e1->typecheck(tenv) << " instead of Int." << std::endl;
+    }
+    return Int;
+}
+
+Symbol lt_class::typecheck(type_env &tenv) {
+    if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
+        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " < " << e2->typecheck(tenv) << std::endl;
+    }
+    return Bool;
+}
+
+Symbol eq_class::typecheck(type_env &tenv) {
+    Symbol t1 = e1->typecheck(tenv);
+    Symbol t2 = e2->typecheck(tenv);
+
+    if ((t1 == Int || t1 == Bool || t1 == Str) && t1 != t2) {
+        classtable->semant_error() << "Illegal comparison with a basic type." << std::endl;
+    }
+    return Bool;
+}
+
+Symbol leq_class::typecheck(type_env &tenv) {
+    if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
+        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " <= " << e2->typecheck(tenv) << std::endl;
+    }
+    return Bool;
 }
 
 
