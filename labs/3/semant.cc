@@ -501,14 +501,6 @@ Symbol leq_class::typecheck(type_env &tenv) {
     return Bool;
 }
 
-Symbol comp_class::typecheck(type_env &tenv) {
-    Symbol t1 = e1->typecheck(tenv);
-    if (t1 != Bool) {
-        classtable->semant_error() << "Argument of 'not' has type " << t1 << " instead of Bool." << std::endl;
-    }
-    return Bool;
-}
-
 Symbol object_class::typecheck(type_env &tenv) {
     if (name == self) {
         return SELF_TYPE;
@@ -534,11 +526,6 @@ Symbol assign_class::typecheck(type_env &tenv) {
 
     if (t == NULL) {
         classtable->semant_error() << "Assignment to undeclared variable " << name << "." << std::endl;
-        return Object;
-    }
-
-    if (name == self) {
-        classtable->semant_error() << "Cannot assign to 'self'." << std::endl;
         return Object;
     }
 
@@ -577,9 +564,60 @@ Symbol let_class::typecheck(type_env &tenv) {
     return body->typecheck(tenv);
 }
 
+Symbol typcase_class::typecheck(type_env &tenv) {
+	std::map<Symbol, Symbol> branch_types;
+
+	Symbol lub = cases->nth(0)->get_expr()->typecheck(tenv);
+    for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
+		Case cs = cases->nth(i);
+		tenv.o.enterscope(); //cambiar??
+
+		if ( branch_types[cs->get_name()] != NULL ) {
+			classtable->semant_error() << "Attribute " << cs->get_name() << " already defined." << std::endl;
+			tenv.o.exitscope();
+			return Object;
+		}
+		branch_types[cs->get_name()] = cs->get_type_decl();
+
+		Symbol t = cs->get_expr()->typecheck(tenv);
+		if ( !is_subclass(t, cs->get_type_decl(), tenv) ) {
+			classtable->semant_error() << "Inferred type " << t << " of"
+				" initialization of " << cs->get_name() << " does not conform to identifier's declared"
+				" type " << cs->get_type_decl() << "." << std::endl;
+			tenv.o.exitscope();
+			return Object;
+		}
+
+		tenv.o.addid(cs->get_name(), new Symbol(cs->get_type_decl()));
+		tenv.o.exitscope();
+		lub = cls_join(lub, cs->get_expr()->typecheck(tenv), tenv);
+	}
+    return lub;
+}
+
+// COMPLETANDO
+Symbol method_class::typecheck(type_env &tenv) {
+	return Object;
+}
+
+// COMPLETANDO
+Symbol static_dispatch_class::typecheck(type_env &tenv) {
+	
+	return Object;
+}
+
+// COMPLETANDO
+Symbol dispatch_class::typecheck(type_env &tenv) {
+	
+	return Object;
+}
+
+
 void build_method_env() {
-    for (const auto &entry : class_map) {
-        Class_ cls = entry.second;
+    //for (const auto &entry : class_map) 
+    for (std::map<Symbol, Class_>::iterator el = class_map.begin(); el != class_map.end(); ++el) {
+        //Class_ cls = entry.second;
+        Class_ cls = el->second;
         Features features = cls->get_features();
 
         for (int i = features->first(); features->more(i); i = features->next(i)) {
@@ -587,7 +625,7 @@ void build_method_env() {
             method_class *method = dynamic_cast<method_class *>(f);
 
             if (method) {
-                method_env.emplace(std::make_pair(cls->get_name(), method->get_name()), method);
+                method_env[std::make_pair(cls->get_name(), method->get_name())] = method;
             }
         }
     }
@@ -648,6 +686,15 @@ void class__class::check() {
 
     tenv.o.exitscope();
 }
+
+// COMPLETANDO
+void program_class::check() {
+    type_env tenv;
+    tenv.o.enterscope();
+    tenv.o.exitscope();
+}
+
+
 /*   This is the entry point to the semantic checker.
 
      Your checker should do the following two things:
