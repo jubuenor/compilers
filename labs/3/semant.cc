@@ -501,10 +501,153 @@ Symbol leq_class::typecheck(type_env &tenv) {
     return Bool;
 }
 
+Symbol comp_class::typecheck(type_env &tenv) {
+    Symbol t1 = e1->typecheck(tenv);
+    if (t1 != Bool) {
+        classtable->semant_error() << "Argument of 'not' has type " << t1 << " instead of Bool." << std::endl;
+    }
+    return Bool;
+}
+
+Symbol object_class::typecheck(type_env &tenv) {
+    if (name == self) {
+        return SELF_TYPE;
+    }
+
+    Symbol *t = tenv.o.lookup(name);
+    if (t == NULL) {
+        classtable->semant_error() << "Undeclared identifier " << name << "." << std::endl;
+        return Object;
+    }
+
+    return *t;
+}
+
+Symbol assign_class::typecheck(type_env &tenv) {
+    if (name == self) {
+        classtable->semant_error() << "Cannot assign to 'self'." << std::endl;
+        return Object;
+    }
+
+    Symbol *t = tenv.o.lookup(name);
+    Symbol t1 = expr->typecheck(tenv);
+
+    if (t == NULL) {
+        classtable->semant_error() << "Assignment to undeclared variable " << name << "." << std::endl;
+        return Object;
+    }
+
+    if (name == self) {
+        classtable->semant_error() << "Cannot assign to 'self'." << std::endl;
+        return Object;
+    }
+
+    if (t1 == No_type) {
+        return t1;
+    }
+
+    if (!is_subclass(t1, *t, tenv)) {
+        classtable->semant_error() << "Type " << t1 << " of assigned expression does not conform to declared type " << *t << " of identifier " << name << "." << std::endl;
+    }
+
+    return t1;
+}
+
+Symbol let_class::typecheck(type_env &tenv) {
+    if (identifier == self) {
+        classtable->semant_error() << "'self' cannot be bound in a 'let' expression." << std::endl;
+        return Object;
+    }
+
+    Symbol t1 = type_decl;
+    Symbol t2 = init->typecheck(tenv);
+
+    if (t2 == No_type) {
+        tenv.o.enterscope();
+        tenv.o.addid(identifier, &t1);
+        return body->typecheck(tenv);
+    }
+
+    if (!is_subclass(t2, t1, tenv)) {
+        classtable->semant_error() << "Inferred type " << t2 << " of initialization of " << identifier << " does not conform to identifier's declared type " << t1 << "." << std::endl;
+    }
+
+    tenv.o.enterscope();
+    tenv.o.addid(identifier, &t1);
+    return body->typecheck(tenv);
+}
+
+void build_method_env() {
+    for (const auto &entry : class_map) {
+        Class_ cls = entry.second;
+        Features features = cls->get_features();
+
+        for (int i = features->first(); features->more(i); i = features->next(i)) {
+            Feature f = features->nth(i);
+            method_class *method = dynamic_cast<method_class *>(f);
+
+            if (method) {
+                method_env.emplace(std::make_pair(cls->get_name(), method->get_name()), method);
+            }
+        }
+    }
+}
 
 
+void build_initial_obj_env(type_env &tenv) {
+    Symbol parent = tenv.c->get_parent();
+    
+    while (class_map.find(parent) != class_map.end()) {
+        Class_ parent_class = class_map[parent];
+        Features features = parent_class->get_features();
 
+        for (int i = features->first(); features->more(i); i = features->next(i)) {
+            Feature f = features->nth(i);
+            attr_class *attribute = dynamic_cast<attr_class *>(f);
 
+            if (attribute) { 
+                if (!tenv.o.lookup(attribute->get_name())) {
+                    tenv.o.addid(attribute->get_name(), new Symbol(attribute->get_type_decl()));
+                }
+            }
+        }
+        parent = parent_class->get_parent(); 
+    }
+
+    Features features = tenv.c->get_features();
+    for (int i = features->first(); features->more(i); i = features->next(i)) {
+        Feature f = features->nth(i);
+        attr_class *attribute = dynamic_cast<attr_class *>(f);
+
+        if (attribute) {  
+            if (tenv.o.lookup(attribute->get_name())) {
+                classtable->semant_error(tenv.c->get_filename(), attribute) 
+                    << "Attribute " << attribute->get_name() 
+                    << " is already defined either in the same class or in a superclass." 
+                    << std::endl;
+            } else {
+                tenv.o.addid(attribute->get_name(), new Symbol(attribute->get_type_decl()));
+            }
+        }
+    }
+
+    tenv.o.addid(self, new Symbol(SELF_TYPE));
+}
+
+void class__class::check() {
+    type_env tenv;
+    tenv.c = this;
+    tenv.o.enterscope();
+
+    build_initial_obj_env(tenv);
+
+    Features features = tenv.c->get_features();
+    for (int i = features->first(); features->more(i); i = features->next(i)) {
+        features->nth(i)->typecheck(tenv);
+    }
+
+    tenv.o.exitscope();
+}
 /*   This is the entry point to the semantic checker.
 
      Your checker should do the following two things:
@@ -527,9 +670,14 @@ void program_class::semant()
 
     /* some semantic analysis code may go here */
 
+    build_method_env();
+
+    check();
+
     if (classtable->errors()) {
-	cerr << "Compilation halted due to static semantic errors." << endl;
-	exit(1);
+        exit_error:
+            cerr << "Compilation halted due to static semantic errors." << endl;
+            exit(1);
     }
 }
 
