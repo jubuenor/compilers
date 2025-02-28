@@ -1,3 +1,4 @@
+// 
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -162,7 +163,6 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
         return;
     }
 
-    // This is probably slow, but I put simplicity first in this case.
     for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
         Class_ cls = classes->nth(i);
         Symbol starting_class = cls->get_name();
@@ -676,7 +676,6 @@ Symbol method_class::typecheck(type_env &tenv) {
     auto c_iter = class_map.find(tenv.c->get_parent());
     if (c_iter != class_map.end()) {
         m = lookup_method(c_iter->second->get_name(), name);
-        // m now holds the derived version of method (if any)
     }
 
     bool derived_formals_are_less = false;
@@ -865,7 +864,7 @@ void build_method_env() {
 
             method_class *method = dynamic_cast<method_class *>(f);
             if (!method) {
-                continue; // f is an attribute not a method, so skip it
+                continue;
             }
 
             method_env[std::make_pair(cls->get_name(), f->get_name())] = method;
@@ -875,7 +874,6 @@ void build_method_env() {
 
 void build_initial_obj_env(type_env &tenv) {
 
-    // First add attributes of superclasses to the object environment.
     for (auto c_iter = class_map.find(tenv.c->get_parent());
          c_iter != class_map.end();
          c_iter = class_map.find(c_iter->second->get_parent())
@@ -887,21 +885,20 @@ void build_initial_obj_env(type_env &tenv) {
 
             attr_class *attribute = dynamic_cast<attr_class *>(f);
             if (!attribute) {
-                continue; // f is a method not an attribute, so skip it
+                continue;
             }
 
             tenv.o.addid(attribute->get_name(), new Symbol(attribute->get_type_decl()));
         }
     }
 
-    // Then add attributes declared on that class to the object environment.
     Features features = tenv.c->get_features();
     for (int i = features->first(); features->more(i); i = features->next(i)) {
         Feature f = features->nth(i);
 
         attr_class *attribute = dynamic_cast<attr_class *>(f);
         if (!attribute) {
-            continue; // f is a method not an attribute, so skip it
+            continue;
         }
 
         if (tenv.o.lookup(attribute->get_name())) {
@@ -914,11 +911,6 @@ void build_initial_obj_env(type_env &tenv) {
     }
 
     tenv.o.addid(self, new Symbol(SELF_TYPE));
-
-    // PS. I feel bad for the code repetition in this function, but I needed
-    // a way to go top-down instead of bottom-up in order to report any
-    // attribute redefinitions where last declared (i.e. reporting them in the
-    // subclass instead of reporting them in the superclass).}
 }
 
 void class__class::check() {
