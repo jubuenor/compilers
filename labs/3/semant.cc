@@ -1,21 +1,19 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
-#include "semant.h"
-#include "cool-tree.h"
 #include "utilities.h"
+#include "semant.h"
 #include <map>
 #include <algorithm>
 #include <vector>  
 
-using namespace std;
 
 extern int semant_debug;
 extern char *curr_filename;
 
 ClassTable *classtable;
 
-static std::map<Symbol, Class_> class_map;
+std::map<Symbol, Class_> class_map;
 
 typedef std::pair<Symbol, Symbol> method_id;
 std::map<method_id, method_class *> method_env;
@@ -327,8 +325,18 @@ ostream& ClassTable::semant_error()
     return error_stream;
 } 
 
+
+///////////////////////////////////////////////////////////////////
+
+
 bool cls_is_defined(Symbol cls_name) {
-    return cls_name == SELF_TYPE || class_map.find(cls_name) != class_map.end();
+    if (cls_name == SELF_TYPE) {
+        return true;
+    }
+    if (class_map.find(cls_name) == class_map.end()) {
+        return false;
+    }
+    return true;
 }
 
 bool is_subclass(Symbol child, Symbol parent, type_env &tenv) {
@@ -337,7 +345,6 @@ bool is_subclass(Symbol child, Symbol parent, type_env &tenv) {
             return true;
         }
         child = tenv.c->get_name();
-
     }
 
     for (auto c_it = class_map.find(child); c_it != class_map.end(); c_it = class_map.find(c_it->second->get_parent())) {
@@ -380,7 +387,7 @@ method_class *lookup_method(Symbol cls_name, Symbol method_name) {
         }
     }
 
-    return nullptr;;
+    return nullptr;
 }
 
 // Type checking
@@ -418,7 +425,7 @@ Symbol new__class::typecheck(type_env &tenv) {
         classtable->semant_error(tenv.c -> get_filename(), this) << "Class " << t << " is not defined." << std::endl;
         type = Object;
     } else {
-        type = type_name;
+        type = t;
     }
     return type;
 }
@@ -441,15 +448,13 @@ Symbol attr_class::typecheck(type_env &tenv) {
     Symbol t0 = type_decl;
     Symbol t1 = init->typecheck(tenv);
 
-    if (t1 == No_type) {
-        return t0;
+    if (t1 != No_type && !is_subclass(t1, t0, tenv)) {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "Inferred type " << t1 << " of initialization of " << name <<
+            " does not conform to identifier's declared type " << t0 << "." << std::endl;
     }
 
-    if (!is_subclass(t1, t0, tenv)) {
-        classtable->semant_error(tenv.c->get_filename(), this) << "Inferred type " << t1 << " of initialization of attribute " << name << " does not conform to declared type " << t0 << "." << std::endl;
-    }
-
-	return type_decl;
+    return t0;
 }
 
 Symbol loop_class::typecheck(type_env &tenv) {
@@ -484,8 +489,9 @@ Symbol plus_class::typecheck(type_env &tenv) {
     if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
         classtable->semant_error(tenv.c->get_filename(), this) << "non-Int arguments: " << e1->typecheck(tenv) << " + " << e2->typecheck(tenv) << std::endl;
         type = Object;
+    } else {
+        type = Int;
     }
-    type = Int;
     return type;
 }
 
@@ -493,8 +499,9 @@ Symbol sub_class::typecheck(type_env &tenv) {
     if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
         classtable->semant_error(tenv.c->get_filename(), this) << "non-Int arguments: " << e1->typecheck(tenv) << " - " << e2->typecheck(tenv) << std::endl;
         type = Object;
+    } else {
+        type = Int;
     }
-    type = Int;
     return type;
 }
 
@@ -502,8 +509,9 @@ Symbol mul_class::typecheck(type_env &tenv) {
     if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
         classtable->semant_error(tenv.c->get_filename(), this) << "non-Int arguments: " << e1->typecheck(tenv) << " * " << e2->typecheck(tenv) << std::endl;
         type = Object;
+    } else {
+        type = Int;
     }
-    type = Int;
     return type;
 }
 
@@ -511,8 +519,9 @@ Symbol divide_class::typecheck(type_env &tenv) {
     if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
         classtable->semant_error(tenv.c->get_filename(), this) << "non-Int arguments: " << e1->typecheck(tenv) << " / " << e2->typecheck(tenv) << std::endl;
         type = Object;
+    } else {
+        type = Int;
     }
-    type = Int;
     return type;
 }
 
@@ -537,7 +546,7 @@ Symbol eq_class::typecheck(type_env &tenv) {
     Symbol t1 = e1->typecheck(tenv);
     Symbol t2 = e2->typecheck(tenv);
 
-    if ((t1 == Int || t1 == Bool || t1 == Str) && t1 != t2) {
+    if ((t1 == Int || t1 == Bool || t1 == Str || t2 == Int || t2 == Bool || t2 == Str) && t1 != t2) {
         classtable->semant_error(tenv.c->get_filename(), this) << "Illegal comparison with a basic type." << std::endl;
     }
     type = Bool;
@@ -579,15 +588,12 @@ Symbol assign_class::typecheck(type_env &tenv) {
         return type;
     }
 
-    if (t1 == No_type) {
-        return type;
-    }
-
     if (!is_subclass(t1, *t, tenv)) {
         classtable->semant_error(tenv.c->get_filename(), this) << "Type " << t1 << " of assigned expression does not conform to declared type " << *t << " of identifier " << name << "." << std::endl;
+        return type;
     }
-
-    return t1;
+    type = t1;
+    return type;
 }
 
 Symbol let_class::typecheck(type_env &tenv) {
