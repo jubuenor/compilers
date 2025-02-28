@@ -342,6 +342,7 @@ bool is_subclass(Symbol child, Symbol parent, type_env &tenv) {
 }
 
 Symbol cls_join(Symbol t1, Symbol t2, type_env &tenv) {
+	if ( t1 == t2 ) return t1;
     if (t1 == SELF_TYPE) {
         t1 = tenv.c->get_name();
     }
@@ -414,6 +415,7 @@ Symbol attr_class::typecheck(type_env &tenv) {
         classtable->semant_error() << "Inferred type " << t1 << " of initialization of attribute " << name << " does not conform to declared type " << t0 << "." << std::endl;
     }
 
+	return type_decl;
 }
 
 Symbol loop_class::typecheck(type_env &tenv) {
@@ -570,11 +572,9 @@ Symbol typcase_class::typecheck(type_env &tenv) {
 	Symbol lub = cases->nth(0)->get_expr()->typecheck(tenv);
     for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
 		Case cs = cases->nth(i);
-		tenv.o.enterscope(); //cambiar??
 
 		if ( branch_types[cs->get_name()] != NULL ) {
-			classtable->semant_error() << "Attribute " << cs->get_name() << " already defined." << std::endl;
-			tenv.o.exitscope();
+			classtable->semant_error() << "Branch with type: " << cs->get_type_decl() << " already defined." << std::endl;
 			return Object;
 		}
 		branch_types[cs->get_name()] = cs->get_type_decl();
@@ -584,10 +584,10 @@ Symbol typcase_class::typecheck(type_env &tenv) {
 			classtable->semant_error() << "Inferred type " << t << " of"
 				" initialization of " << cs->get_name() << " does not conform to identifier's declared"
 				" type " << cs->get_type_decl() << "." << std::endl;
-			tenv.o.exitscope();
 			return Object;
 		}
 
+		tenv.o.enterscope();
 		tenv.o.addid(cs->get_name(), new Symbol(cs->get_type_decl()));
 		tenv.o.exitscope();
 		lub = cls_join(lub, cs->get_expr()->typecheck(tenv), tenv);
@@ -595,28 +595,85 @@ Symbol typcase_class::typecheck(type_env &tenv) {
     return lub;
 }
 
-// COMPLETANDO
 Symbol method_class::typecheck(type_env &tenv) {
+
+	// verify method does not exist in current class
+	method_class *mth = method_env[std::make_pair(tenv.c->get_name(), name)];
+	if ( this != mth ) {
+		classtable->semant_error() << "Duplicated method name: " << name << std::endl;
+		return Object;
+	}
+
+	// verify that return_type class exists
+	if ( class_map.find(return_type) == class_map.end() && return_type != SELF_TYPE ) {
+		classtable->semant_error() << "Class '" << return_type << "' does not exist." << std::endl;
+		return Object;
+	}
+	
+	// verify that formals are properly made
+	std::map<Symbol, Symbol> formal_names;
+    for (int i = formals->first(); formals->more(i); i = formals->next(i)) {
+		Symbol formal_name = formals->nth(i)->get_name();
+		Symbol formal_type = formals->nth(i)->get_type_decl();
+		if ( formal_name == self ) {
+			classtable->semant_error() << "Formal with 'self' identifier." << std::endl;
+			return Object;
+		}
+		if ( formal_type == SELF_TYPE ) {
+			classtable->semant_error() << "Formal with invalid return type: SELF_TYPE" << std::endl;
+			return Object;
+		}
+		//if ( formal_names.find(formal_name) == formal_names.end() ) 
+		if ( formal_names[formal_name] == NULL ) {
+			// no hay set, magnifico
+			//formal_names.insert(formal_name);
+			formal_names[formal_name] = formal_name;
+
+			tenv.o.enterscope();
+			tenv.o.addid(formal_name, new Symbol(formal_type));
+			tenv.o.exitscope();
+		}
+		else {
+			classtable->semant_error() << "Method with repeated formal: " << formal_name << std::endl;
+			return Object;
+		}
+	}
+
+	// verify that expr returns subtype of return_type
+	Symbol t = expr->typecheck(tenv);
+	if ( !is_subclass(t, return_type, tenv) ) {
+		classtable->semant_error() << "Inferred type " << t << " of initialization of '" << name << "' does not conform to method's declared type " << return_type << "." << std::endl;
+		return Object;
+	}
+	return return_type;
+}
+
+Symbol dispatch_class::typecheck(type_env &tenv) {
+	
+/*
+expr.id(t0, t1, ...) : T { body }
+
+// check if expr class has id method
+// check if every ti expression has correct type
+// if T is SELF_TYPE then return type of expr
+// if not, then look for return type of id in expr class
+*/
 	return Object;
 }
 
 // COMPLETANDO
 Symbol static_dispatch_class::typecheck(type_env &tenv) {
-	
-	return Object;
-}
+		
+/*
+expr[@T0].id() : T1 { body }
 
-// COMPLETANDO
-Symbol dispatch_class::typecheck(type_env &tenv) {
-	
+*/
 	return Object;
 }
 
 
 void build_method_env() {
-    //for (const auto &entry : class_map) 
     for (std::map<Symbol, Class_>::iterator el = class_map.begin(); el != class_map.end(); ++el) {
-        //Class_ cls = entry.second;
         Class_ cls = el->second;
         Features features = cls->get_features();
 
