@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include "semant.h"
+#include "cool-tree.h"
 #include "utilities.h"
 #include <map>
 #include <algorithm>
@@ -139,44 +140,50 @@ bool check_inheritance(std::map<Symbol, Class_>& class_map) {
 }
 
 ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) {
-
-    /* Fill this in */
     install_basic_classes();
 
-    if (classes == NULL) {
-        semant_error() << "No classes defined." << endl;
+    for(int i = classes->first(); classes->more(i); i = classes->next(i)) {
+        Class_ cls = classes->nth(i);
+        Symbol name = cls->get_name();
+
+        if (class_map.find(name) != class_map.end()) {
+            semant_error(cls) << "redefinition of class " << name << "." << std::endl;
+            return;
+        }
+
+        if (name == SELF_TYPE) {
+            semant_error(cls) << "Redefinition of basic class SELF_TYPE." << std::endl;
+            return;
+        }
+
+        class_map.insert(std::make_pair(name, cls));
+    }
+
+    if (class_map.find(Main) == class_map.end()) {
+        semant_error() << "Class Main is not defined." << std::endl;
         return;
     }
 
-    for (int i = classes->first(); classes->more(i); i = classes->next(i))
-    {
-        Class_ c = classes->nth(i);
-        Symbol class_name = c->get_name();
+    // This is probably slow, but I put simplicity first in this case.
+    for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
+        Class_ cls = classes->nth(i);
+        Symbol starting_class = cls->get_name();
 
-        if (class_name == SELF_TYPE) {
-            semant_error(c) << "Redefinition of basic class SELF_TYPE." << endl;
-            return;
-        }
+        for (Symbol parent = cls->get_parent(); parent != Object; cls = class_map[parent], parent = cls->get_parent()) {
+            if (class_map.find(parent) == class_map.end()) {
+                semant_error(cls) << "Parent class " << parent << " is not defined." << std::endl;
+                return;
+            }
 
-        if (class_name == No_class) {
-            semant_error(c) << "Redefinition of basic class No_class." << endl;
-            return;
-        }
+            if (parent == Int || parent == Bool || parent == Str || parent == SELF_TYPE) {
+                semant_error(cls) << "Classes cannot inherit from basic class" << parent << std::endl;
+                return;
+            }
 
-        if (class_map.find(class_name) != class_map.end()) {
-            semant_error(c) << "Redefinition of class." << endl;
-            return;
-        }
-
-        class_map[class_name] = c;
-
-        if (class_map.find(Main) == class_map.end()) {
-            semant_error(c) << "Class Main is not defined." << endl;
-            return;
-        }
-
-        if (check_inheritance(class_map)) {
-            return;
+            if (parent == starting_class) {
+                semant_error(cls) << "An inheritance cycle has been detected." << std::endl;
+                return;
+            }
         }
     }
 }
@@ -281,11 +288,11 @@ void ClassTable::install_basic_classes() {
 						      no_expr()))),
 	       filename);
 
-    class_map[Object] = Object_class;
-    class_map[IO] = IO_class;
-    class_map[Int] = Int_class;
-    class_map[Bool] = Bool_class;
-    class_map[Str] = Str_class;
+    class_map.insert(std::make_pair(Object, Object_class));
+    class_map.insert(std::make_pair(IO, IO_class));
+    class_map.insert(std::make_pair(Int, Int_class));
+    class_map.insert(std::make_pair(Bool, Bool_class));
+    class_map.insert(std::make_pair(Str, Str_class));
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -333,8 +340,8 @@ bool is_subclass(Symbol child, Symbol parent, type_env &tenv) {
 
     }
 
-    for (Symbol cls = child; cls != Object; cls = class_map[cls]->get_parent()) {
-        if (cls == parent) {
+    for (auto c_it = class_map.find(child); c_it != class_map.end(); c_it = class_map.find(c_it->second->get_parent())) {
+        if (c_it->second->get_name() == parent) {
             return true;
         }
     }
@@ -342,7 +349,6 @@ bool is_subclass(Symbol child, Symbol parent, type_env &tenv) {
 }
 
 Symbol cls_join(Symbol t1, Symbol t2, type_env &tenv) {
-	if ( t1 == t2 ) return t1;
     if (t1 == SELF_TYPE) {
         t1 = tenv.c->get_name();
     }
@@ -358,49 +364,77 @@ Symbol cls_join(Symbol t1, Symbol t2, type_env &tenv) {
     return cl->get_name();
 }
 
+method_class *method_in_class(Symbol cls_name, Symbol method_name) {
+    auto it = method_env.find(std::make_pair(cls_name, method_name));
+    if (it != method_env.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+method_class *lookup_method(Symbol cls_name, Symbol method_name) {
+    for (auto c_it = class_map.find(cls_name); c_it != class_map.end(); c_it = class_map.find(c_it->second->get_parent())) {
+        method_class *mth = method_in_class(c_it->second->get_parent(), method_name);
+        if (mth) {
+            return mth;
+        }
+    }
+
+    return nullptr;;
+}
+
 // Type checking
 
 
 Symbol int_const_class::typecheck(type_env &tenv) {
-    return Int;
+    type = Int;
+    return type;
 }
 
 Symbol bool_const_class::typecheck(type_env &tenv) {
-    return Bool;
+    type = Bool;
+    return type;
 }
 
 Symbol string_const_class::typecheck(type_env &tenv) {
-    return Str;
+    type = Str;
+    return type;
 }
 
 Symbol no_expr_class::typecheck(type_env &tenv) {
-    return No_type;
+    type = No_type;
+    return type;
 }
 
 Symbol isvoid_class::typecheck(type_env &tenv) {
     e1->typecheck(tenv);
-    return Bool;
+    type = Bool;
+    return type;
 }
 
 Symbol new__class::typecheck(type_env &tenv) {
-    if (!cls_is_defined(type_name)) {
-        classtable->semant_error() << "Class " << type_name << " is not defined." << std::endl;
-        return Object;
+    Symbol t = type_name;
+    if (!cls_is_defined(t)) {
+        classtable->semant_error(tenv.c -> get_filename(), this) << "Class " << t << " is not defined." << std::endl;
+        type = Object;
+    } else {
+        type = type_name;
     }
-    return type_name;
+    return type;
 }
 
 Symbol comp_class::typecheck(type_env &tenv) {
-    Symbol t1 = e1->typecheck(tenv);
-    if (t1 != Bool) {
-        classtable->semant_error() << "Argument of 'not' has type " << t1 << " instead of Bool." << std::endl;
+    type = e1->typecheck(tenv);
+    if (type != Bool) {
+        classtable->semant_error(tenv.c->get_filename(), this) << "Argument of 'not' has type " << type << " instead of Bool." << std::endl;
     }
-    return Bool;
+    type = Bool;
+    return type;
 }
 
 Symbol attr_class::typecheck(type_env &tenv) {
     if (name == self) {
-        classtable->semant_error() << "'self' cannot be the name of an attribute." << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "'self' cannot be the name of an attribute." << std::endl;
         return Object;
     }
 
@@ -412,7 +446,7 @@ Symbol attr_class::typecheck(type_env &tenv) {
     }
 
     if (!is_subclass(t1, t0, tenv)) {
-        classtable->semant_error() << "Inferred type " << t1 << " of initialization of attribute " << name << " does not conform to declared type " << t0 << "." << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "Inferred type " << t1 << " of initialization of attribute " << name << " does not conform to declared type " << t0 << "." << std::endl;
     }
 
 	return type_decl;
@@ -420,10 +454,11 @@ Symbol attr_class::typecheck(type_env &tenv) {
 
 Symbol loop_class::typecheck(type_env &tenv) {
     if (pred->typecheck(tenv) != Bool) {
-        classtable->semant_error() << "Loop condition does not have type Bool." << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "Loop condition does not have type Bool." << std::endl;
     }
     body->typecheck(tenv);
-    return Object;
+    type = Object;
+    return type;
 }
 
 Symbol block_class::typecheck(type_env &tenv) {
@@ -439,51 +474,63 @@ Symbol cond_class::typecheck(type_env &tenv) {
     Symbol t3 = else_exp->typecheck(tenv);
 
     if (t1 != Bool) {
-        classtable->semant_error() << "Predicate of 'if' does not have type Bool." << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "Predicate of 'if' does not have type Bool." << std::endl;
     }
-    return cls_join(t2, t3, tenv);
+    type = cls_join(t2, t3, tenv);
+    return type;
 }
 
 Symbol plus_class::typecheck(type_env &tenv) {
     if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
-        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " + " << e2->typecheck(tenv) << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "non-Int arguments: " << e1->typecheck(tenv) << " + " << e2->typecheck(tenv) << std::endl;
+        type = Object;
     }
-    return Int;
+    type = Int;
+    return type;
 }
 
 Symbol sub_class::typecheck(type_env &tenv) {
     if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
-        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " - " << e2->typecheck(tenv) << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "non-Int arguments: " << e1->typecheck(tenv) << " - " << e2->typecheck(tenv) << std::endl;
+        type = Object;
     }
-    return Int;
+    type = Int;
+    return type;
 }
 
 Symbol mul_class::typecheck(type_env &tenv) {
     if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
-        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " * " << e2->typecheck(tenv) << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "non-Int arguments: " << e1->typecheck(tenv) << " * " << e2->typecheck(tenv) << std::endl;
+        type = Object;
     }
-    return Int;
+    type = Int;
+    return type;
 }
 
 Symbol divide_class::typecheck(type_env &tenv) {
     if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
-        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " / " << e2->typecheck(tenv) << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "non-Int arguments: " << e1->typecheck(tenv) << " / " << e2->typecheck(tenv) << std::endl;
+        type = Object;
     }
-    return Int;
+    type = Int;
+    return type;
 }
 
 Symbol neg_class::typecheck(type_env &tenv) {
-    if (e1->typecheck(tenv) != Int) {
-        classtable->semant_error() << "Argument of '~' has type " << e1->typecheck(tenv) << " instead of Int." << std::endl;
+    type = e1->typecheck(tenv);
+    if (type != Int) {
+        classtable->semant_error(tenv.c->get_filename(), this) << "Argument of '~' has type " << e1->typecheck(tenv) << " instead of Int." << std::endl;
+        type = Int;
     }
-    return Int;
+    return type;
 }
 
 Symbol lt_class::typecheck(type_env &tenv) {
     if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
-        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " < " << e2->typecheck(tenv) << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "non-Int arguments: " << e1->typecheck(tenv) << " < " << e2->typecheck(tenv) << std::endl;
     }
-    return Bool;
+    type = Bool;
+    return type;
 }
 
 Symbol eq_class::typecheck(type_env &tenv) {
@@ -491,242 +538,381 @@ Symbol eq_class::typecheck(type_env &tenv) {
     Symbol t2 = e2->typecheck(tenv);
 
     if ((t1 == Int || t1 == Bool || t1 == Str) && t1 != t2) {
-        classtable->semant_error() << "Illegal comparison with a basic type." << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "Illegal comparison with a basic type." << std::endl;
     }
-    return Bool;
+    type = Bool;
+    return type;
 }
 
 Symbol leq_class::typecheck(type_env &tenv) {
     if (e1->typecheck(tenv) != Int || e2->typecheck(tenv) != Int) {
-        classtable->semant_error() << "non-Int arguments: " << e1->typecheck(tenv) << " <= " << e2->typecheck(tenv) << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "non-Int arguments: " << e1->typecheck(tenv) << " <= " << e2->typecheck(tenv) << std::endl;
     }
-    return Bool;
+    type = Bool;
+    return type;
 }
 
 Symbol object_class::typecheck(type_env &tenv) {
-    if (name == self) {
-        return SELF_TYPE;
-    }
-
     Symbol *t = tenv.o.lookup(name);
-    if (t == NULL) {
-        classtable->semant_error() << "Undeclared identifier " << name << "." << std::endl;
-        return Object;
+    if (!t) {
+        classtable->semant_error(tenv.c->get_filename(), this) << "Undeclared identifier " << name << "." << std::endl;
+        type = Object;
+        return type;
     }
-
-    return *t;
+    type = *t;
+    return type;
 }
 
 Symbol assign_class::typecheck(type_env &tenv) {
+    type = Object;
+
     if (name == self) {
-        classtable->semant_error() << "Cannot assign to 'self'." << std::endl;
-        return Object;
+        classtable->semant_error(tenv.c->get_filename(), this) << "Cannot assign to 'self'." << std::endl;
+        return type;
     }
 
     Symbol *t = tenv.o.lookup(name);
     Symbol t1 = expr->typecheck(tenv);
 
-    if (t == NULL) {
-        classtable->semant_error() << "Assignment to undeclared variable " << name << "." << std::endl;
-        return Object;
+    if (!t) {
+        classtable->semant_error(tenv.c->get_filename(), this) << "Assignment to undeclared variable " << name << "." << std::endl;
+        return type;
     }
 
     if (t1 == No_type) {
-        return t1;
+        return type;
     }
 
     if (!is_subclass(t1, *t, tenv)) {
-        classtable->semant_error() << "Type " << t1 << " of assigned expression does not conform to declared type " << *t << " of identifier " << name << "." << std::endl;
+        classtable->semant_error(tenv.c->get_filename(), this) << "Type " << t1 << " of assigned expression does not conform to declared type " << *t << " of identifier " << name << "." << std::endl;
     }
 
     return t1;
 }
 
 Symbol let_class::typecheck(type_env &tenv) {
-    if (identifier == self) {
-        classtable->semant_error() << "'self' cannot be bound in a 'let' expression." << std::endl;
-        return Object;
-    }
 
-    Symbol t1 = type_decl;
-    Symbol t2 = init->typecheck(tenv);
+    Symbol t0 = type_decl;
+    Symbol t1 = init->typecheck(tenv);
 
-    if (t2 == No_type) {
-        tenv.o.enterscope();
-        tenv.o.addid(identifier, &t1);
-        return body->typecheck(tenv);
-    }
-
-    if (!is_subclass(t2, t1, tenv)) {
-        classtable->semant_error() << "Inferred type " << t2 << " of initialization of " << identifier << " does not conform to identifier's declared type " << t1 << "." << std::endl;
+    if (t1 != No_type && !is_subclass(t1, t0, tenv)) {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "Inferred type " << t1 << " of initialization of " << identifier <<
+            " does not conform to identifier's declared type " << t0 << "." << std::endl;
     }
 
     tenv.o.enterscope();
-    tenv.o.addid(identifier, &t1);
-    return body->typecheck(tenv);
+
+    if (identifier != self) {
+        tenv.o.addid(identifier, new Symbol(t0));
+    } else {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "'self' cannot be bound in a 'let' expression." << std::endl;
+    }
+
+    type = body->typecheck(tenv);
+
+    tenv.o.exitscope();
+
+    return type;
 }
 
 Symbol typcase_class::typecheck(type_env &tenv) {
-	std::map<Symbol, Symbol> branch_types;
 
-	Symbol lub = cases->nth(0)->get_expr()->typecheck(tenv);
+    Symbol t0 = expr->typecheck(tenv);
+
+    std::vector<Symbol> used;
+
     for (int i = cases->first(); cases->more(i); i = cases->next(i)) {
-		Case cs = cases->nth(i);
+        Symbol prev_type = type;
 
-		if ( branch_types[cs->get_name()] != NULL ) {
-			classtable->semant_error() << "Branch with type: " << cs->get_type_decl() << " already defined." << std::endl;
-			return Object;
-		}
-		branch_types[cs->get_name()] = cs->get_type_decl();
+        Case c = cases->nth(i);
+        Symbol type_decl = c->get_type_decl();
 
-		Symbol t = cs->get_expr()->typecheck(tenv);
-		if ( !is_subclass(t, cs->get_type_decl(), tenv) ) {
-			classtable->semant_error() << "Inferred type " << t << " of"
-				" initialization of " << cs->get_name() << " does not conform to identifier's declared"
-				" type " << cs->get_type_decl() << "." << std::endl;
-			return Object;
-		}
+        if (std::find(used.begin(), used.end(), type_decl) == used.end() ) {
+            used.push_back(type_decl);
+        } else {
+            classtable->semant_error(tenv.c->get_filename(), this) <<
+                "Duplicate branch " << type_decl << " in case statement." << std::endl;
 
-		tenv.o.enterscope();
-		tenv.o.addid(cs->get_name(), new Symbol(cs->get_type_decl()));
-		tenv.o.exitscope();
-		lub = cls_join(lub, cs->get_expr()->typecheck(tenv), tenv);
-	}
-    return lub;
+            type = Object;
+            return type;
+        }
+
+        tenv.o.enterscope();
+
+        tenv.o.addid(c->get_name(), new Symbol(type_decl));
+        type = c->get_expr()->typecheck(tenv);
+
+        if (i > 0) {
+            type = cls_join(type, prev_type, tenv);
+        }
+
+        tenv.o.exitscope();
+    }
+
+    return type;
 }
 
 Symbol method_class::typecheck(type_env &tenv) {
 
-	// verify method does not exist in current class
-	method_class *mth = method_env[std::make_pair(tenv.c->get_name(), name)];
-	if ( this != mth ) {
-		classtable->semant_error() << "Duplicated method name: " << name << std::endl;
-		return Object;
-	}
+    tenv.o.enterscope();
 
-	// verify that return_type class exists
-	if ( class_map.find(return_type) == class_map.end() && return_type != SELF_TYPE ) {
-		classtable->semant_error() << "Class '" << return_type << "' does not exist." << std::endl;
-		return Object;
-	}
-	
-	// verify that formals are properly made
-	std::map<Symbol, Symbol> formal_names;
-    for (int i = formals->first(); formals->more(i); i = formals->next(i)) {
-		Symbol formal_name = formals->nth(i)->get_name();
-		Symbol formal_type = formals->nth(i)->get_type_decl();
-		if ( formal_name == self ) {
-			classtable->semant_error() << "Formal with 'self' identifier." << std::endl;
-			return Object;
-		}
-		if ( formal_type == SELF_TYPE ) {
-			classtable->semant_error() << "Formal with invalid return type: SELF_TYPE" << std::endl;
-			return Object;
-		}
-		//if ( formal_names.find(formal_name) == formal_names.end() ) 
-		if ( formal_names[formal_name] == NULL ) {
-			// no hay set, magnifico
-			//formal_names.insert(formal_name);
-			formal_names[formal_name] = formal_name;
+    tenv.o.addid(self, new Symbol(SELF_TYPE));
 
-			tenv.o.enterscope();
-			tenv.o.addid(formal_name, new Symbol(formal_type));
-			tenv.o.exitscope();
-		}
-		else {
-			classtable->semant_error() << "Method with repeated formal: " << formal_name << std::endl;
-			return Object;
-		}
-	}
+    method_class *m = method_in_class(tenv.c->get_name(), name);
 
-	// verify that expr returns subtype of return_type
-	Symbol t = expr->typecheck(tenv);
-	if ( !is_subclass(t, return_type, tenv) ) {
-		classtable->semant_error() << "Inferred type " << t << " of initialization of '" << name << "' does not conform to method's declared type " << return_type << "." << std::endl;
-		return Object;
-	}
-	return return_type;
+    if (this != m) {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "Method " << name << " is multiply defined." << std::endl;
+    }
+
+    auto c_iter = class_map.find(tenv.c->get_parent());
+    if (c_iter != class_map.end()) {
+        m = lookup_method(c_iter->second->get_name(), name);
+        // m now holds the derived version of method (if any)
+    }
+
+    bool derived_formals_are_less = false;
+
+    std::vector<Symbol> defined;
+
+    int i;
+    for (i = formals->first(); formals->more(i); i = formals->next(i)) {
+        Formal f = formals->nth(i);
+        Symbol f_name = f->get_name();
+        Symbol type_decl = f->get_type_decl();
+
+        if (f_name == self) {
+            classtable->semant_error(tenv.c->get_filename(), this) <<
+                "'self' cannot be the name of a formal parameter." << std::endl;
+        } else {
+            if (type_decl == SELF_TYPE) {
+                classtable->semant_error(tenv.c->get_filename(), this) <<
+                    "Formal parameter " << f_name << " cannot have type SELF_TYPE." << std::endl;
+            } else if (!cls_is_defined(type_decl)) {
+                classtable->semant_error(tenv.c->get_filename(), this) <<
+                    "Class " << type_decl << " of formal parameter " <<
+                    f_name << " is undefined." << std::endl;
+            }
+
+            if (std::find(defined.begin(), defined.end(), f_name) == defined.end() ) {
+                defined.push_back(f_name);
+            } else {
+                classtable->semant_error(tenv.c->get_filename(), this) <<
+                    "Formal parameter " << f_name << " is multiply defined." << std::endl;
+            }
+
+            tenv.o.addid(f->get_name(), new Symbol(type_decl));
+        }
+
+        if (m) {
+            Formals formals_derived = m->get_formals();
+            if (formals_derived->more(i)) {
+                Formal f_derived = formals_derived->nth(i);
+                if (f_derived->get_type_decl() != type_decl) {
+                    classtable->semant_error(tenv.c->get_filename(), this) <<
+                        "In redefined method " << name << ", parameter type "
+                         << type_decl << " is different from original type "
+                         << f_derived->get_type_decl() << std::endl;
+                }
+            } else {
+                derived_formals_are_less = true;
+            }
+        }
+    }
+
+    if (m && (derived_formals_are_less || m->get_formals()->more(i))) {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "Incompatible number of formal parameters in redefined method "
+            << name << "." << std::endl;
+    }
+
+    Symbol t0_ = expr->typecheck(tenv);
+    tenv.o.exitscope();
+
+    if (! is_subclass(t0_, return_type, tenv)) {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "Inferred return type " << t0_ << " of method init does not conform "
+            "to declared return type " << return_type << "." << std::endl;
+    }
+
+    return Object;
 }
 
 Symbol dispatch_class::typecheck(type_env &tenv) {
-	
-/*
-expr.id(t0, t1, ...) : T { body }
+    Symbol t0 = expr->typecheck(tenv);
+    Symbol t0_ = t0;
+    if (t0_ == SELF_TYPE) {
+        t0_ = tenv.c->get_name();
+    }
 
-// check if expr class has id method
-// check if every ti expression has correct type
-// if T is SELF_TYPE then return type of expr
-// if not, then look for return type of id in expr class
-*/
-	return Object;
+    method_class *method = lookup_method(t0_, name);
+    if (!method) {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "Dispatch to undefined method " << name << "." << std::endl;
+
+        type = Object;
+        return type;
+    }
+
+    Formals formals = method->get_formals();
+
+    bool formals_are_less;
+    int i;
+
+    for (i = actual->first(); actual->more(i); i = actual->next(i)) {
+        Symbol t_actual = actual->nth(i)->typecheck(tenv);
+
+        if (formals->more(i)) {
+            Formal f = formals->nth(i);
+            Symbol t_formal = f->get_type_decl();
+
+            if (!is_subclass(t_actual, t_formal, tenv)) {
+                classtable->semant_error(tenv.c->get_filename(), this) <<
+                    "In call of method " << name << ", type " << t_actual <<
+                    " of parameter " << f->get_name() << " does not conform to "
+                    "declared type " << t_formal << "." << std::endl;
+            }
+        } else {
+            formals_are_less = true;
+        }
+    }
+
+    if (formals_are_less || formals->more(i)) {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "Method " << name << " called with wrong number of arguments." << std::endl;
+    }
+
+    type = method->get_return_type();
+    if (type == SELF_TYPE) {
+        type = t0;
+    }
+
+    return type;
 }
 
-// COMPLETANDO
 Symbol static_dispatch_class::typecheck(type_env &tenv) {
-		
-/*
-expr[@T0].id() : T1 { body }
+    
+    Symbol t0 = expr->typecheck(tenv);
+    Symbol t = type_name;
 
-*/
-	return Object;
+    if (!is_subclass(t0, t, tenv)) {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "Expression type " << t0 << " does not conform to declared static "
+            "dispatch type " << t << "." << std::endl;
+    }
+
+    method_class *method = lookup_method(t, name);
+    if (!method) {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "Dispatch to undefined method " << name << "." << std::endl;
+        type = Object;
+        return type;
+    }
+
+    Formals formals = method->get_formals();
+
+    bool formals_are_less;
+    int i;
+
+    for (i = actual->first(); actual->more(i); i = actual->next(i)) {
+        Symbol t_actual = actual->nth(i)->typecheck(tenv);
+
+        if (formals->more(i)) {
+            Formal f = formals->nth(i);
+            Symbol t_formal = f->get_type_decl();
+
+            if (!is_subclass(t_actual, t_formal, tenv)) {
+                classtable->semant_error(tenv.c->get_filename(), this) <<
+                    "In call of method " << name << ", type " << t_actual <<
+                    " of parameter " << f->get_name() << " does not conform to "
+                    "declared type " << t_formal << "." << std::endl;
+            }
+        } else {
+            formals_are_less = true;
+        }
+    }
+
+    if (formals_are_less || formals->more(i)) {
+        classtable->semant_error(tenv.c->get_filename(), this) <<
+            "Method " << name << " called with wrong number of arguments." << std::endl;
+    }
+
+    type = method->get_return_type();
+    if (type == SELF_TYPE) {
+        type = t0;
+    }
+
+    return type;
+		
 }
 
 
 void build_method_env() {
-    for (std::map<Symbol, Class_>::iterator el = class_map.begin(); el != class_map.end(); ++el) {
-        Class_ cls = el->second;
-        Features features = cls->get_features();
+    for (auto iter = class_map.begin(); iter != class_map.end(); iter++) {
+        Class_ cls = iter->second;
 
+        Features features = cls->get_features();
         for (int i = features->first(); features->more(i); i = features->next(i)) {
             Feature f = features->nth(i);
-            method_class *method = dynamic_cast<method_class *>(f);
 
-            if (method) {
-                method_env[std::make_pair(cls->get_name(), method->get_name())] = method;
+            method_class *method = dynamic_cast<method_class *>(f);
+            if (!method) {
+                continue; // f is an attribute not a method, so skip it
             }
+
+            method_env[std::make_pair(cls->get_name(), f->get_name())] = method;
         }
-    }
-}
+    }}
 
 
 void build_initial_obj_env(type_env &tenv) {
-    Symbol parent = tenv.c->get_parent();
-    
-    while (class_map.find(parent) != class_map.end()) {
-        Class_ parent_class = class_map[parent];
-        Features features = parent_class->get_features();
 
+    // First add attributes of superclasses to the object environment.
+    for (auto c_iter = class_map.find(tenv.c->get_parent());
+         c_iter != class_map.end();
+         c_iter = class_map.find(c_iter->second->get_parent())
+         ) {
+
+        Features features = c_iter->second->get_features();
         for (int i = features->first(); features->more(i); i = features->next(i)) {
             Feature f = features->nth(i);
-            attr_class *attribute = dynamic_cast<attr_class *>(f);
 
-            if (attribute) { 
-                if (!tenv.o.lookup(attribute->get_name())) {
-                    tenv.o.addid(attribute->get_name(), new Symbol(attribute->get_type_decl()));
-                }
+            attr_class *attribute = dynamic_cast<attr_class *>(f);
+            if (!attribute) {
+                continue; // f is a method not an attribute, so skip it
             }
+
+            tenv.o.addid(attribute->get_name(), new Symbol(attribute->get_type_decl()));
         }
-        parent = parent_class->get_parent(); 
     }
 
+    // Then add attributes declared on that class to the object environment.
     Features features = tenv.c->get_features();
     for (int i = features->first(); features->more(i); i = features->next(i)) {
         Feature f = features->nth(i);
-        attr_class *attribute = dynamic_cast<attr_class *>(f);
 
-        if (attribute) {  
-            if (tenv.o.lookup(attribute->get_name())) {
-                classtable->semant_error(tenv.c->get_filename(), attribute) 
-                    << "Attribute " << attribute->get_name() 
-                    << " is already defined either in the same class or in a superclass." 
-                    << std::endl;
-            } else {
-                tenv.o.addid(attribute->get_name(), new Symbol(attribute->get_type_decl()));
-            }
+        attr_class *attribute = dynamic_cast<attr_class *>(f);
+        if (!attribute) {
+            continue; // f is a method not an attribute, so skip it
+        }
+
+        if (tenv.o.lookup(attribute->get_name())) {
+            classtable->semant_error(tenv.c->get_filename(), attribute) <<
+                "Attribute " << attribute->get_name() << " is already defined "
+                "either in the same class or in a superclass." << std::endl;
+        } else {
+            tenv.o.addid(attribute->get_name(), new Symbol(attribute->get_type_decl()));
         }
     }
 
     tenv.o.addid(self, new Symbol(SELF_TYPE));
+
+    // PS. I feel bad for the code repetition in this function, but I needed
+    // a way to go top-down instead of bottom-up in order to report any
+    // attribute redefinitions where last declared (i.e. reporting them in the
+    // subclass instead of reporting them in the superclass).}
 }
 
 void class__class::check() {
@@ -744,11 +930,10 @@ void class__class::check() {
     tenv.o.exitscope();
 }
 
-// COMPLETANDO
 void program_class::check() {
-    type_env tenv;
-    tenv.o.enterscope();
-    tenv.o.exitscope();
+    for (int i = classes->first(); classes->more(i); i = classes->next(i)) {
+        classes->nth(i)->check();
+    }
 }
 
 
@@ -771,6 +956,9 @@ void program_class::semant()
 
     /* ClassTable constructor may do some semantic analysis */
     ClassTable *classtable = new ClassTable(classes);
+    if (classtable->errors()) {
+        goto exit_error;
+    }
 
     /* some semantic analysis code may go here */
 
